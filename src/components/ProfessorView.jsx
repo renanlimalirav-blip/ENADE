@@ -74,8 +74,9 @@ export const ProfessorView = ({ HeaderRoleSwitcher }) => {
   // Right Column Preview Mode (Web vs Mobile - US12)
   const [previewDevice, setPreviewDevice] = useState('web'); // 'web' | 'mobile'
 
-  // Peer review feedback input
+  // Peer review feedback input & filter (BUG-11)
   const [peerNotes, setPeerNotes] = useState({});
+  const [peerFilter, setPeerFilter] = useState('pendentes'); // 'pendentes' | 'todas'
 
   // Shared repository filters (US18)
   const [repoCourseFilter, setRepoCourseFilter] = useState('Todos');
@@ -119,6 +120,9 @@ export const ProfessorView = ({ HeaderRoleSwitcher }) => {
 
   const loadQuestionIntoForm = (q) => {
     setEditingId(q.id);
+    setCourse(q.course || state.currentUser?.course || 'ADS / Computação');
+    setCustomCourse('');
+    setShowAddCourseInput(false);
     setDiscipline(q.discipline);
     setCustomDiscipline('');
     setTopic(q.topic);
@@ -1220,21 +1224,41 @@ export const ProfessorView = ({ HeaderRoleSwitcher }) => {
           {/* FILA DE REVISÃO POR PARES (US02) */}
           {activeNav === 'revisao_pares' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              <div>
-                <h1 style={{ fontSize: '1.55rem', fontWeight: 800 }}>
-                  Revisão por Pares (US02)
-                </h1>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem' }}>
-                  Fluxo ágil de validação entre professores colegas da área. A questão aprovada recebe o selo visual &ldquo;Questão Validada&rdquo; e segue para o parecer do NDE.
-                </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h1 style={{ fontSize: '1.55rem', fontWeight: 800 }}>
+                    Revisão por Pares (US02)
+                  </h1>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem' }}>
+                    Fluxo ágil de validação entre professores colegas da área. A questão aprovada recebe o selo visual &ldquo;Questão Validada&rdquo; e segue para o parecer do NDE.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${peerFilter === 'pendentes' ? 'btn-primary' : 'btn-outline'}`}
+                    onClick={() => setPeerFilter('pendentes')}
+                  >
+                    Pendentes ({pendingPeerReviewList.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${peerFilter === 'todas' ? 'btn-primary' : 'btn-outline'}`}
+                    onClick={() => setPeerFilter('todas')}
+                  >
+                    Todas ({state.questions.length})
+                  </button>
+                </div>
               </div>
 
-              {state.questions.length === 0 ? (
+              {(peerFilter === 'pendentes' ? pendingPeerReviewList : state.questions).length === 0 ? (
                 <div className="empty-state">
-                  Nenhuma questão cadastrada ainda para revisão.
+                  {peerFilter === 'pendentes'
+                    ? 'Nenhuma questão aguardando revisão por pares no momento. Clique em "Todas" para consultar o banco já validado.'
+                    : 'Nenhuma questão cadastrada ainda para revisão.'}
                 </div>
               ) : (
-                state.questions.map((q) => {
+                (peerFilter === 'pendentes' ? pendingPeerReviewList : state.questions).map((q) => {
                   const isVal = q.peerValidated || q.status === 'validada_pares' || q.status === 'aprovada_nde';
                   return (
                     <div key={q.id} className="card">
@@ -1487,7 +1511,7 @@ export const ProfessorView = ({ HeaderRoleSwitcher }) => {
           {activeNav === 'downloads' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
               <h1 style={{ fontSize: '1.55rem', fontWeight: 800 }}>Meus downloads</h1>
-              {state.downloads.length === 0 ? (
+              {state.downloads.filter((dl) => !dl.professorId || dl.professorId === state.currentUser?.id).length === 0 ? (
                 <div className="empty-state">
                   Você ainda não realizou downloads de questões do repositório compartilhado.
                 </div>
@@ -1503,7 +1527,9 @@ export const ProfessorView = ({ HeaderRoleSwitcher }) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {state.downloads.map((dl) => (
+                      {state.downloads
+                        .filter((dl) => !dl.professorId || dl.professorId === state.currentUser?.id)
+                        .map((dl) => (
                         <tr key={dl.id}>
                           <td>
                             <strong>{dl.title}</strong>

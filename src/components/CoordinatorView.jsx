@@ -64,15 +64,31 @@ export const CoordinatorView = ({ HeaderRoleSwitcher }) => {
     setTimeout(() => setToast(''), 3500);
   };
 
-  // Filtered attempts for Tela C1
+  // Filtered attempts for Tela C1 (BUG-05: aplica periodFilter e topSearch)
   const filteredAttempts = useMemo(() => {
+    const now = Date.now();
+    const maxAgeMs = (Number(periodFilter) || 30) * 24 * 60 * 60 * 1000;
+    const term = topSearch.trim().toLowerCase();
+
     return state.attempts.filter((a) => {
       if (courseFilter !== 'Todos' && a.userCourse !== courseFilter) return false;
       if (classFilter !== 'Todas' && a.userClass !== classFilter) return false;
       if (discFilter !== 'Todas' && a.discipline !== discFilter) return false;
+      if (a.timestamp) {
+        const age = now - new Date(a.timestamp).getTime();
+        if (age > maxAgeMs) return false;
+      }
+      if (term) {
+        const match =
+          (a.discipline || '').toLowerCase().includes(term) ||
+          (a.topic || '').toLowerCase().includes(term) ||
+          (a.userClass || '').toLowerCase().includes(term) ||
+          (a.userCourse || '').toLowerCase().includes(term);
+        if (!match) return false;
+      }
       return true;
     });
-  }, [state.attempts, courseFilter, classFilter, discFilter]);
+  }, [state.attempts, courseFilter, classFilter, discFilter, periodFilter, topSearch]);
 
   // Performance & Bottleneck Alerts Calculation (US07)
   const coordMetrics = useMemo(() => {
@@ -521,23 +537,45 @@ export const CoordinatorView = ({ HeaderRoleSwitcher }) => {
                   <svg viewBox="0 0 400 130" style={{ width: '100%', height: '130px' }}>
                     <line x1="30" y1="15" x2="30" y2="105" stroke="#cbd5e1" />
                     <line x1="30" y1="105" x2="380" y2="105" stroke="#cbd5e1" />
-                    {coordMetrics.totalAns > 0 && (
-                      <>
-                        <polyline
-                          fill="none"
-                          stroke="var(--primary)"
-                          strokeWidth="2.5"
-                          points="30,90 115,76 200,64 285,50 370,38"
-                        />
-                        <polyline
-                          fill="none"
-                          stroke="#d97706"
-                          strokeWidth="2.5"
-                          strokeDasharray="4 4"
-                          points="30,95 115,86 200,78 285,70 370,62"
-                        />
-                      </>
-                    )}
+                    {(() => {
+                      const now = Date.now();
+                      const weekMs = 7 * 24 * 60 * 60 * 1000;
+                      const buckets = [0, 1, 2, 3, 4].map((i) => ({ right: 0, total: 0, idx: i }));
+                      filteredAttempts.forEach((a) => {
+                        const wAgo = Math.floor(Math.max(0, now - new Date(a.timestamp).getTime()) / weekMs);
+                        const bIdx = 4 - Math.min(4, wAgo);
+                        buckets[bIdx].total += 1;
+                        if (a.isCorrect) buckets[bIdx].right += 1;
+                      });
+                      const pts = buckets
+                        .map((b, i) => ({
+                          x: 30 + i * 85,
+                          y: b.total > 0 ? Math.max(20, Math.min(100, Math.round(105 - (b.right / b.total) * 85))) : null,
+                          pct: b.total > 0 ? Math.round((b.right / b.total) * 100) : null
+                        }))
+                        .filter((p) => p.y !== null);
+
+                      return (
+                        <>
+                          {pts.length > 1 && (
+                            <polyline
+                              fill="none"
+                              stroke="var(--primary)"
+                              strokeWidth="2.5"
+                              points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
+                            />
+                          )}
+                          {pts.map((p, i) => (
+                            <g key={i}>
+                              <circle cx={p.x} cy={p.y} r="4" fill="var(--primary)" />
+                              <text x={p.x - 8} y={p.y - 7} fontSize="9" fontWeight="700" fill="var(--primary)">
+                                {p.pct}%
+                              </text>
+                            </g>
+                          ))}
+                        </>
+                      );
+                    })()}
                     {['S1', 'S2', 'S3', 'S4', 'S5'].map((s, i) => (
                       <text key={s} x={26 + i * 85} y="122" fontSize="10" fill="#64748b">
                         {s}
@@ -707,22 +745,40 @@ export const CoordinatorView = ({ HeaderRoleSwitcher }) => {
                               </td>
                             </tr>
                           ) : (
-                            [
-                              ...state.disciplines.map((d) => ({
-                                id: d.id,
-                                name: d.name,
-                                count: state.questions.filter((q) => q.discipline === d.name).length,
-                                target: 10
-                              })),
-                              ...(currentMatrix?.competencies || []).map((c) => ({
-                                id: c.id,
-                                name: c.name,
-                                count: state.questions.filter(
-                                  (q) => q.discipline === c.name || q.topic === c.name
-                                ).length,
-                                target: c.targetCount || 10
-                              }))
-                            ].map((row) => {
+                            // BUG-09 fixed: deduplica competências e conta apenas questões validadas/aprovadas
+                            (() => {
+                              const validatedOnly = state.questions.filter(
+                                (q) => q.peerValidated || q.status === 'aprovada_nde'
+                              );
+                              const seen = new Set();
+                              const rows = [];
+                              [
+                                ...(currentMatrix?.competencies || []).map((c) => ({
+                                  id: c.id,
+                                  name: c.name,
+                                  target: c.targetCount || 10
+                                })),
+                                ...state.disciplines.map((d) => ({
+                                  id: d.id,
+                                  name: d.name,
+                                  target: 10
+                                }))
+                              ].forEach((item) => {
+                                const key = item.name.trim().toLowerCase();
+                                if (!seen.has(key)) {
+                                  seen.add(key);
+                                  rows.push({
+                                    ...item,
+                                    count: validatedOnly.filter(
+                                      (q) =>
+                                        (q.discipline || '').toLowerCase() === key ||
+                                        (q.topic || '').toLowerCase() === key
+                                    ).length
+                                  });
+                                }
+                              });
+                              return rows;
+                            })().map((row) => {
                               const pct = Math.min(100, Math.round((row.count / Math.max(1, row.target)) * 100));
                               return (
                                 <tr key={row.id}>
@@ -922,8 +978,17 @@ export const CoordinatorView = ({ HeaderRoleSwitcher }) => {
                       <button
                         type="button"
                         className="btn btn-success"
-                        disabled={!currentNDEQuestion}
+                        disabled={!currentNDEQuestion || !currentNDEQuestion.peerValidated}
+                        title={
+                          currentNDEQuestion && !currentNDEQuestion.peerValidated
+                            ? 'Aprovação para o banco exige revisão por pares concluída antes do parecer do NDE (US20).'
+                            : ''
+                        }
                         onClick={() => {
+                          if (!currentNDEQuestion.peerValidated) {
+                            showNotice('Aprovação exige revisão por pares concluída antes do parecer do NDE.');
+                            return;
+                          }
                           evaluateQuestionByNDE(currentNDEQuestion.id, {
                             competency: ndeCompetency,
                             content: ndeContent,

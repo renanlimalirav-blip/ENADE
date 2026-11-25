@@ -95,7 +95,7 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
     setTimeout(() => setFeedbackToast(''), 3200);
   };
 
-  // Timer effect for active session (US14)
+  // Timer effect for active session (US14) — BUG-02 fixed: auto-finalizes cleanly via handleFinishSession
   useEffect(() => {
     if (!activeSession || activeSession.finished) return;
     const interval = setInterval(() => {
@@ -106,24 +106,75 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
         return {
           ...prev,
           elapsedSec: nextElapsed,
-          remainingSec: nextRemaining,
-          finished: prev.mode === 'cronometrado' && nextRemaining === 0 ? true : prev.finished
+          remainingSec: nextRemaining
         };
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [activeSession]);
+  }, [activeSession?.finished, Boolean(activeSession)]);
+
+  // Auto-finish timed simulado when remainingSec hits 0 so all answers are recorded (BUG-02)
+  useEffect(() => {
+    if (activeSession && !activeSession.finished && activeSession.mode === 'cronometrado' && activeSession.remainingSec === 0) {
+      handleFinishSession();
+    }
+  }, [activeSession?.remainingSec, activeSession?.finished]);
 
   // Available questions for students (all non-draft questions, or all created questions)
   const availableQuestions = useMemo(() => {
     return state.questions.filter((q) => q.status !== 'rascunho' && q.status !== 'reprovada');
   }, [state.questions]);
 
-  // Student's own attempts
+  // Student's own attempts, simulados, templates, notes (BUG-08: isolamento LGPD por usuário)
   const myAttempts = useMemo(() => {
     if (!state.currentUser) return [];
     return state.attempts.filter((a) => a.userId === state.currentUser.id);
   }, [state.attempts, state.currentUser]);
+
+  const mySimulados = useMemo(() => {
+    if (!state.currentUser) return [];
+    return state.simulados.filter((s) => s.userId === state.currentUser.id);
+  }, [state.simulados, state.currentUser]);
+
+  const mySavedTemplates = useMemo(() => {
+    if (!state.currentUser) return [];
+    return state.savedTemplates.filter((t) => !t.userId || t.userId === state.currentUser.id);
+  }, [state.savedTemplates, state.currentUser]);
+
+  const mySavedNotes = useMemo(() => {
+    if (!state.currentUser) return [];
+    return state.savedNotes.filter((n) => !n.userId || n.userId === state.currentUser.id);
+  }, [state.savedNotes, state.currentUser]);
+
+  // Dynamic weekly evolution data computed from real student attempts (BUG-07)
+  const weeklyEvolutionPoints = useMemo(() => {
+    const numWeeks = Number(evolWeeksFilter) || 8;
+    const filtered =
+      evolCatFilter === 'Todas'
+        ? myAttempts
+        : myAttempts.filter((a) => a.discipline === evolCatFilter);
+
+    const now = Date.now();
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const buckets = Array.from({ length: numWeeks }, (_, i) => ({
+      label: `S${i + 1}`,
+      correct: 0,
+      total: 0
+    }));
+
+    filtered.forEach((a) => {
+      const ts = new Date(a.timestamp).getTime();
+      const weeksAgo = Math.floor(Math.max(0, now - ts) / weekMs);
+      const bucketIndex = numWeeks - 1 - Math.min(numWeeks - 1, weeksAgo);
+      buckets[bucketIndex].total += 1;
+      if (a.isCorrect) buckets[bucketIndex].correct += 1;
+    });
+
+    return buckets.map((b) => ({
+      ...b,
+      pct: b.total > 0 ? Math.round((b.correct / b.total) * 100) : null
+    }));
+  }, [myAttempts, evolWeeksFilter, evolCatFilter]);
 
   // Performance metrics calculation (US06, US16, US17, US22)
   const metrics = useMemo(() => {
@@ -395,7 +446,11 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
       answers: activeSession.answers
     });
 
-    setActiveSession((prev) => ({ ...prev, finished: true }));
+    setActiveSession((prev) => ({
+      ...prev,
+      finished: true,
+      resultSummary: { correctCount, totalCount, scorePct }
+    }));
     showToast(`Atividade concluída! Você acertou ${correctCount} de ${totalCount} (${scorePct}%).`);
   };
 
@@ -425,7 +480,9 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
 
   // If an active Simulado / Question Solver session is open, render the full-screen Solver (Page 12 & Page 8 wireframes)
   if (activeSession) {
-    const currentQ = activeSession.questions[activeSession.currentIndex];
+    // BUG-01 fixed: sempre lê a versão viva da questão em state.questions para refletir novos comentários imediatamente
+    const rawQ = activeSession.questions[activeSession.currentIndex];
+    const currentQ = state.questions.find((q) => q.id === rawQ?.id) || rawQ;
     const currentAns = activeSession.answers[currentQ?.id];
     const isAnswered = Boolean(currentAns?.submitted || activeSession.finished);
     const isCorrect = currentAns?.selectedOption === currentQ?.correctOption;
@@ -837,8 +894,13 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
           )}
 
           {activeSession.finished ? (
-            <div className="card" style={{ textAlign: 'center', padding: '36px 24px', marginBottom: '24px' }}>
+            <div className="card" style={{ textAlign: 'center', padding: '32px 24px', marginBottom: '24px' }}>
               <h2 style={{ fontSize: '1.5rem', marginBottom: '8px' }}>Resultado do Simulado</h2>
+              {activeSession.resultSummary && (
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--primary)', marginBottom: '8px' }}>
+                  {activeSession.resultSummary.correctCount} / {activeSession.resultSummary.totalCount} acertos ({activeSession.resultSummary.scorePct}%)
+                </div>
+              )}
               <p style={{ color: 'var(--text-secondary)', marginBottom: '18px' }}>
                 Tempo total utilizado: <strong>{formatTimer(activeSession.elapsedSec)}</strong>
               </p>
@@ -1435,18 +1497,18 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
                 </div>
               </div>
 
-              {/* Histórico recente */}
+              {/* Histórico recente (isolado por aluno - BUG-08) */}
               <div className="card">
                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '14px' }}>
                   Histórico recente
                 </h3>
-                {state.simulados.length === 0 ? (
+                {mySimulados.length === 0 ? (
                   <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
                     Nenhum simulado concluído ainda.
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {state.simulados.slice(0, 4).map((sim) => (
+                    {mySimulados.slice(0, 4).map((sim) => (
                       <div
                         key={sim.id}
                         style={{
@@ -2223,7 +2285,7 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
             </div>
           )}
 
-          {/* 4. MEUS SIMULADOS, QUESTÕES SALVAS E ANOTAÇÕES */}
+          {/* 4. MEUS SIMULADOS, MODELOS, QUESTÕES SALVAS E ANOTAÇÕES (BUG-04 & BUG-08 corrigidos) */}
           {activeTab === 'meus_simulados' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <h1 style={{ fontSize: '1.55rem', fontWeight: 800 }}>Meus simulados e caderno</h1>
@@ -2233,10 +2295,10 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
                   <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '12px' }}>
                     Histórico de simulados realizados
                   </h3>
-                  {state.simulados.length === 0 ? (
+                  {mySimulados.length === 0 ? (
                     <div className="empty-state">Nenhum simulado realizado ainda.</div>
                   ) : (
-                    state.simulados.map((s) => (
+                    mySimulados.map((s) => (
                       <div
                         key={s.id}
                         style={{
@@ -2270,14 +2332,105 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
 
                 <div className="card">
                   <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '12px' }}>
+                    Modelos de Simulado Salvos ({mySavedTemplates.length})
+                  </h3>
+                  {mySavedTemplates.length === 0 ? (
+                    <div className="empty-state">
+                      Nenhum modelo salvo. Use o botão &ldquo;Salvar como modelo&rdquo; na tela Montar Simulado.
+                    </div>
+                  ) : (
+                    mySavedTemplates.map((tpl) => (
+                      <div
+                        key={tpl.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '10px 0',
+                          borderBottom: '1px solid var(--border-color)'
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{tpl.title}</div>
+                          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                            {tpl.qty} questões · {tpl.mode === 'cronometrado' ? `${tpl.timeMin} min` : 'Livre'} · Dificuldade: {tpl.difficulty}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => {
+                            const qs = availableQuestions.filter((q) =>
+                              matchesSimSelection(q, 'Todos', tpl.topics || [])
+                            );
+                            startQuestionSession(
+                              (qs.length > 0 ? qs : availableQuestions).slice(0, tpl.qty || 10),
+                              tpl.title,
+                              tpl.mode || 'cronometrado',
+                              tpl.timeMin || 40,
+                              'cada_questao'
+                            );
+                          }}
+                        >
+                          Iniciar
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="grid-2">
+                <div className="card">
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '12px' }}>
+                    Questões Salvas / Favoritas ({state.savedQuestionIds.length})
+                  </h3>
+                  {state.savedQuestionIds.length === 0 ? (
+                    <div className="empty-state">
+                      Nenhuma questão favoritada. Clique em &ldquo;Salvar&rdquo; nas questões do Banco de Questões.
+                    </div>
+                  ) : (
+                    availableQuestions
+                      .filter((q) => state.savedQuestionIds.includes(q.id))
+                      .map((q) => (
+                        <div
+                          key={q.id}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '10px',
+                            padding: '10px 0',
+                            borderBottom: '1px solid var(--border-color)'
+                          }}
+                        >
+                          <div style={{ fontSize: '0.88rem' }}>
+                            <strong>{q.code}</strong> · {q.discipline} &gt; {q.topic}
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-sm"
+                            onClick={() =>
+                              startQuestionSession([q], `Questão ${q.code}`, 'livre', 20, 'cada_questao')
+                            }
+                          >
+                            Resolver
+                          </button>
+                        </div>
+                      ))
+                  )}
+                </div>
+
+                <div className="card">
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '12px' }}>
                     Meus Resumos e Anotações Salvas (US15)
                   </h3>
-                  {state.savedNotes.length === 0 ? (
+                  {mySavedNotes.length === 0 ? (
                     <div className="empty-state">
                       Nenhum resumo salvo ainda. Ao ver a explicação de uma questão, clique em &ldquo;Salvar resumo nas minhas anotações&rdquo;.
                     </div>
                   ) : (
-                    state.savedNotes.map((n) => (
+                    mySavedNotes.map((n) => (
                       <div
                         key={n.id}
                         style={{
@@ -2322,102 +2475,104 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
                 </button>
               </div>
 
-              <div className="grid-2">
-                {/* Left Card: Seu diagnóstico & Sugestões para esta semana */}
-                <div className="card">
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '6px' }}>Seu diagnóstico</h3>
-                  <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '14px' }}>
-                    Você erra mais em:
-                  </div>
-
-                  {metrics.byTopic.length === 0 ? (
-                    <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '16px' }}>
-                      Responda questões para que o sistema identifique automaticamente seus pontos fracos e sugira um plano de revisão.
+              <div className={revSubTab === 'plano' ? 'grid-2' : ''}>
+                {/* Left Card: Seu diagnóstico & Sugestões para esta semana (visível na aba Plano de revisão) */}
+                {revSubTab === 'plano' && (
+                  <div className="card">
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '6px' }}>Seu diagnóstico</h3>
+                    <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '14px' }}>
+                      Você erra mais em:
                     </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
-                      {metrics.byTopic.slice(0, 3).map((t) => (
-                        <div
-                          key={t.topic}
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            paddingBottom: '10px',
-                            borderBottom: '1px solid var(--border-color)'
+
+                    {metrics.byTopic.length === 0 ? (
+                      <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '16px' }}>
+                        Responda questões para que o sistema identifique automaticamente seus pontos fracos e sugira um plano de revisão.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+                        {metrics.byTopic.slice(0, 3).map((t) => (
+                          <div
+                            key={t.topic}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              paddingBottom: '10px',
+                              borderBottom: '1px solid var(--border-color)'
+                            }}
+                          >
+                            <span style={{ fontSize: '0.92rem' }}>{t.topic}</span>
+                            <span className={`badge ${t.pct < 50 ? 'badge-danger' : 'badge-revisao'}`}>
+                              {t.pct}%
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '12px' }}>
+                      Sugestões para esta semana
+                    </h4>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '18px' }}>
+                      {metrics.byTopic.slice(0, 2).map((t, idx) => {
+                        const topicQs = availableQuestions.filter((q) => q.topic === t.topic);
+                        return (
+                          <div
+                            key={t.topic}
+                            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                          >
+                            <span style={{ fontSize: '0.92rem' }}>
+                              {idx + 1}. {t.topic} · {topicQs.length} questões
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() =>
+                                startQuestionSession(topicQs, `Revisão: ${t.topic}`, 'livre', 20, 'cada_questao')
+                              }
+                            >
+                              Treinar
+                            </button>
+                          </div>
+                        );
+                      })}
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.92rem' }}>
+                          Refazer questões que errei
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          onClick={() => {
+                            const wrongQIds = myAttempts.filter((a) => !a.isCorrect).map((a) => a.questionId);
+                            const wrongQs = availableQuestions.filter((q) => wrongQIds.includes(q.id));
+                            startQuestionSession(wrongQs, 'Refazer Questões Erradas', 'livre', 20, 'cada_questao');
                           }}
                         >
-                          <span style={{ fontSize: '0.92rem' }}>{t.topic}</span>
-                          <span className={`badge ${t.pct < 50 ? 'badge-danger' : 'badge-revisao'}`}>
-                            {t.pct}%
-                          </span>
-                        </div>
-                      ))}
+                          Refazer
+                        </button>
+                      </div>
                     </div>
-                  )}
 
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '12px' }}>
-                    Sugestões para esta semana
-                  </h4>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '18px' }}>
-                    {metrics.byTopic.slice(0, 2).map((t, idx) => {
-                      const topicQs = availableQuestions.filter((q) => q.topic === t.topic);
-                      return (
-                        <div
-                          key={t.topic}
-                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                        >
-                          <span style={{ fontSize: '0.92rem' }}>
-                            {idx + 1}. {t.topic} · {topicQs.length} questões
-                          </span>
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            onClick={() =>
-                              startQuestionSession(topicQs, `Revisão: ${t.topic}`, 'livre', 20, 'cada_questao')
-                            }
-                          >
-                            Treinar
-                          </button>
-                        </div>
-                      );
-                    })}
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '0.92rem' }}>
-                        Refazer questões que errei
-                      </span>
-                      <button
-                        type="button"
-                        className="btn btn-outline btn-sm"
-                        onClick={() => {
-                          const wrongQIds = myAttempts.filter((a) => !a.isCorrect).map((a) => a.questionId);
-                          const wrongQs = availableQuestions.filter((q) => wrongQIds.includes(q.id));
-                          startQuestionSession(wrongQs, 'Refazer Questões Erradas', 'livre', 20, 'cada_questao');
-                        }}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                      <span>Tempo estimado: 1h40 · Meta:</span>
+                      <select
+                        className="form-select"
+                        style={{ width: 'auto', padding: '5px 10px', fontSize: '0.82rem' }}
+                        value={state.weeklyGoalDays}
+                        onChange={(e) => updatePreferences({ weeklyGoalDays: Number(e.target.value) })}
                       >
-                        Refazer
-                      </button>
+                        <option value={2}>2 dias na semana</option>
+                        <option value={3}>3 dias na semana</option>
+                        <option value={5}>5 dias na semana</option>
+                      </select>
                     </div>
                   </div>
+                )}
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
-                    <span>Tempo estimado: 1h40 · Meta:</span>
-                    <select
-                      className="form-select"
-                      style={{ width: 'auto', padding: '5px 10px', fontSize: '0.82rem' }}
-                      value={state.weeklyGoalDays}
-                      onChange={(e) => updatePreferences({ weeklyGoalDays: Number(e.target.value) })}
-                    >
-                      <option value={2}>2 dias na semana</option>
-                      <option value={3}>3 dias na semana</option>
-                      <option value={5}>5 dias na semana</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Right Card: Acertos por semana (US22) */}
+                {/* Right Card: Acertos por semana (US22 — dados reais dinâmicos - BUG-07) */}
                 <div className="card">
                   <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '14px' }}>
                     Acertos por semana
@@ -2445,7 +2600,7 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
                     </select>
                   </div>
 
-                  {/* SVG Evolution Line Chart */}
+                  {/* Dynamic SVG Evolution Line Chart */}
                   <div style={{ width: '100%', height: '210px', position: 'relative' }}>
                     <svg viewBox="0 0 420 180" style={{ width: '100%', height: '100%' }}>
                       {[25, 70, 115, 155].map((y, idx) => (
@@ -2456,33 +2611,44 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
                           </text>
                         </g>
                       ))}
-                      {metrics.totalResolved > 0 && (
-                        <>
-                          <polyline
-                            fill="none"
-                            stroke="var(--primary)"
-                            strokeWidth="3"
-                            points={`55,120 102,110 150,95 198,85 246,85 294,75 342,58 390,${Math.max(25, 155 - Math.round(metrics.overallPct * 1.3))}`}
-                          />
-                          {[
-                            [55, 120],
-                            [102, 110],
-                            [150, 95],
-                            [198, 85],
-                            [246, 85],
-                            [294, 75],
-                            [342, 58],
-                            [390, Math.max(25, 155 - Math.round(metrics.overallPct * 1.3))]
-                          ].map(([cx, cy], i) => (
-                            <circle key={i} cx={cx} cy={cy} r="4.5" fill="var(--primary)" />
-                          ))}
-                        </>
-                      )}
-                      {['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'].map((lbl, i) => (
-                        <text key={lbl} x={48 + i * 48} y="174" fontSize="10" fill="#64748b">
-                          {lbl}
-                        </text>
-                      ))}
+                      {(() => {
+                        const n = weeklyEvolutionPoints.length;
+                        const stepX = n > 1 ? 335 / (n - 1) : 0;
+                        const activePts = weeklyEvolutionPoints
+                          .map((pt, i) => ({
+                            x: Math.round(55 + i * stepX),
+                            y: pt.pct !== null ? Math.max(25, Math.min(155, Math.round(155 - pt.pct * 1.3))) : null,
+                            pct: pt.pct,
+                            label: pt.label
+                          }))
+                          .filter((p) => p.y !== null);
+
+                        return (
+                          <>
+                            {activePts.length > 1 && (
+                              <polyline
+                                fill="none"
+                                stroke="var(--primary)"
+                                strokeWidth="3"
+                                points={activePts.map((p) => `${p.x},${p.y}`).join(' ')}
+                              />
+                            )}
+                            {activePts.map((p, i) => (
+                              <g key={i}>
+                                <circle cx={p.x} cy={p.y} r="4.5" fill="var(--primary)" />
+                                <text x={p.x - 10} y={p.y - 8} fontSize="9" fontWeight="700" fill="var(--primary)">
+                                  {p.pct}%
+                                </text>
+                              </g>
+                            ))}
+                            {weeklyEvolutionPoints.map((pt, i) => (
+                              <text key={pt.label} x={Math.round(48 + i * stepX)} y="174" fontSize="10" fill="#64748b">
+                                {pt.label}
+                              </text>
+                            ))}
+                          </>
+                        );
+                      })()}
                     </svg>
                   </div>
                 </div>

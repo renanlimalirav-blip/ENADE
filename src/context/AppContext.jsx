@@ -413,59 +413,57 @@ export const AppProvider = ({ children }) => {
       ensureDisciplineAndTopic(dClean, tClean, cClean);
     }
 
-    let createdOrUpdated = null;
+    const isEdit = Boolean(questionData.id);
+    const nextNum = state.questions.length + 1;
+    const code = questionData.code || `Q-${String(nextNum).padStart(4, '0')}`;
+    const status = submitForReview
+      ? 'em_revisao'
+      : questionData.status || 'rascunho';
+
+    const record = {
+      id: questionData.id || `q_${Date.now()}`,
+      code,
+      course: cClean,
+      discipline: dClean,
+      topic: tClean,
+      difficulty: questionData.difficulty || 'Média',
+      year: questionData.year || 'ENADE 2023',
+      officialSource: questionData.officialSource || 'INEP/MEC - Banco Institucional ENADE',
+      isUpdated: Boolean(questionData.isUpdated),
+      baseText: questionData.baseText || '',
+      statement: questionData.statement || '',
+      options: questionData.options || [
+        { letter: 'A', text: '' },
+        { letter: 'B', text: '' },
+        { letter: 'C', text: '' },
+        { letter: 'D', text: '' },
+        { letter: 'E', text: '' }
+      ],
+      correctOption: questionData.correctOption || 'A',
+      shortErrorReason: questionData.shortErrorReason || '',
+      explanation: {
+        mainIdea: questionData.explanation?.mainIdea || '',
+        steps: questionData.explanation?.steps || [],
+        summary: questionData.explanation?.summary || '',
+        videoUrl: questionData.explanation?.videoUrl || '',
+        videoDuration: questionData.explanation?.videoDuration || '2 min'
+      },
+      studyLinks: questionData.studyLinks || [],
+      status,
+      peerValidated: questionData.peerValidated || false,
+      peerReviewer: questionData.peerReviewer || null,
+      peerValidatedAt: questionData.peerValidatedAt || null,
+      peerFeedback: questionData.peerFeedback || '',
+      ndeEvaluation: questionData.ndeEvaluation || null,
+      authorId: questionData.authorId || state.currentUser?.id || 'prof',
+      authorName: questionData.authorName || state.currentUser?.name || 'Professor',
+      createdAt: questionData.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      comments: questionData.comments || [],
+      errorReports: questionData.errorReports || []
+    };
+
     setState((prev) => {
-      const isEdit = Boolean(questionData.id);
-      const nextNum = prev.questions.length + 1;
-      const code = questionData.code || `Q-${String(nextNum).padStart(4, '0')}`;
-      const status = submitForReview
-        ? 'em_revisao'
-        : questionData.status || 'rascunho';
-
-      const record = {
-        id: questionData.id || `q_${Date.now()}`,
-        code,
-        course: cClean,
-        discipline: dClean,
-        topic: tClean,
-        difficulty: questionData.difficulty || 'Média',
-        year: questionData.year || 'ENADE 2023',
-        officialSource: questionData.officialSource || 'INEP/MEC - Banco Institucional ENADE',
-        isUpdated: Boolean(questionData.isUpdated),
-        baseText: questionData.baseText || '',
-        statement: questionData.statement || '',
-        options: questionData.options || [
-          { letter: 'A', text: '' },
-          { letter: 'B', text: '' },
-          { letter: 'C', text: '' },
-          { letter: 'D', text: '' },
-          { letter: 'E', text: '' }
-        ],
-        correctOption: questionData.correctOption || 'A',
-        shortErrorReason: questionData.shortErrorReason || '',
-        explanation: {
-          mainIdea: questionData.explanation?.mainIdea || '',
-          steps: questionData.explanation?.steps || [],
-          summary: questionData.explanation?.summary || '',
-          videoUrl: questionData.explanation?.videoUrl || '',
-          videoDuration: questionData.explanation?.videoDuration || '2 min'
-        },
-        studyLinks: questionData.studyLinks || [],
-        status,
-        peerValidated: questionData.peerValidated || false,
-        peerReviewer: questionData.peerReviewer || null,
-        peerValidatedAt: questionData.peerValidatedAt || null,
-        peerFeedback: questionData.peerFeedback || '',
-        ndeEvaluation: questionData.ndeEvaluation || null,
-        authorId: questionData.authorId || prev.currentUser?.id || 'prof',
-        authorName: questionData.authorName || prev.currentUser?.name || 'Professor',
-        createdAt: questionData.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        comments: questionData.comments || [],
-        errorReports: questionData.errorReports || []
-      };
-
-      createdOrUpdated = record;
       const updatedQuestions = isEdit
         ? prev.questions.map((q) => (q.id === record.id ? record : q))
         : [record, ...prev.questions];
@@ -476,7 +474,7 @@ export const AppProvider = ({ children }) => {
       };
     });
 
-    return createdOrUpdated;
+    return record;
   };
 
   // Peer Review (US02)
@@ -600,7 +598,12 @@ export const AppProvider = ({ children }) => {
     setState((prev) => ({
       ...prev,
       savedTemplates: [
-        { id: `tpl_${Date.now()}`, createdAt: new Date().toISOString(), ...template },
+        {
+          id: `tpl_${Date.now()}`,
+          userId: prev.currentUser?.id || 'anon',
+          createdAt: new Date().toISOString(),
+          ...template
+        },
         ...prev.savedTemplates
       ]
     }));
