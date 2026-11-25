@@ -350,7 +350,7 @@ export const AuthView = () => {
             style={{ width: '100%', marginTop: '6px', padding: '12px' }}
           >
             {authMode === 'login'
-              ? 'Entrar com conta da faculdade (SSO)'
+              ? 'Entrar'
               : 'Cadastrar e entrar'}
           </button>
         </form>
