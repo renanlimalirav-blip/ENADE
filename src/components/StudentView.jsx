@@ -2423,7 +2423,7 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
 
                 <div className="card">
                   <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '12px' }}>
-                    Meus Resumos e Anotações Salvas (US15)
+                    Meus Resumos e Anotações Salvas
                   </h3>
                   {mySavedNotes.length === 0 ? (
                     <div className="empty-state">
@@ -2831,7 +2831,7 @@ export const StudentView = ({ HeaderRoleSwitcher }) => {
                     onChange={(e) => updatePreferences({ gamificationEnabled: e.target.checked })}
                     style={{ accentColor: 'var(--primary)', width: '17px', height: '17px' }}
                   />
-                  Habilitar gamificação e ranking (opcional - US09)
+                  Habilitar gamificação e ranking (opcional)
                 </label>
               </div>
 

@@ -981,7 +981,7 @@ export const CoordinatorView = ({ HeaderRoleSwitcher }) => {
                         disabled={!currentNDEQuestion || !currentNDEQuestion.peerValidated}
                         title={
                           currentNDEQuestion && !currentNDEQuestion.peerValidated
-                            ? 'Aprovação para o banco exige revisão por pares concluída antes do parecer do NDE (US20).'
+                            ? 'Aprovação para o banco exige revisão por pares concluída antes do parecer do NDE.'
                             : ''
                         }
                         onClick={() => {

@@ -722,7 +722,7 @@ export const ProfessorView = ({ HeaderRoleSwitcher }) => {
                           onChange={(e) => setIsUpdated(e.target.checked)}
                           style={{ accentColor: 'var(--primary)' }}
                         />
-                        Sinalizar como <strong>Conteúdo Atualizado</strong> (US21)
+                        Sinalizar como <strong>Conteúdo Atualizado</strong>
                       </label>
                     </div>
                   </div>
@@ -831,7 +831,7 @@ export const ProfessorView = ({ HeaderRoleSwitcher }) => {
                   {/* 3. Explicação pedagógica (US05) e materiais (US24) */}
                   <div className="card">
                     <h3 style={{ fontSize: '0.98rem', fontWeight: 700, marginBottom: '10px' }}>
-                      3. Explicação pedagógica (US05) e materiais (US24)
+                      3. Explicação pedagógica e materiais complementares
                     </h3>
 
                     <div className="tabs-header" style={{ marginBottom: '14px' }}>
@@ -861,7 +861,7 @@ export const ProfessorView = ({ HeaderRoleSwitcher }) => {
                     {expTab === 'etapas' && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label className="form-label">Ideia principal da questão (US15)</label>
+                          <label className="form-label">Ideia principal da questão</label>
                           <input
                             type="text"
                             className="form-input"
@@ -1227,7 +1227,7 @@ export const ProfessorView = ({ HeaderRoleSwitcher }) => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                   <h1 style={{ fontSize: '1.55rem', fontWeight: 800 }}>
-                    Revisão por Pares (US02)
+                    Revisão por Pares
                   </h1>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem' }}>
                     Fluxo ágil de validação entre professores colegas da área. A questão aprovada recebe o selo visual &ldquo;Questão Validada&rdquo; e segue para o parecer do NDE.
@@ -1355,7 +1355,7 @@ export const ProfessorView = ({ HeaderRoleSwitcher }) => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                   <h1 style={{ fontSize: '1.55rem', fontWeight: 800 }}>
-                    Repositório Compartilhado de Professores (US18)
+                    Repositório Compartilhado de Professores
                   </h1>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                     Localize questões por filtros e realize o download de exercícios para reutilizar em suas aulas e simulados.
